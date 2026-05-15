@@ -48,4 +48,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Shipping-PDF-Splitter-Windows
-          path: dist/Shipping PDF Splitter/
+          path: dist/Shipping PDF Splitter.exe

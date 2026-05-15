@@ -53,7 +53,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build_windows.ps1
 The executable is created at:
 
 ```text
-dist/Shipping PDF Splitter/Shipping PDF Splitter.exe
+dist/Shipping PDF Splitter.exe
 ```
 
 ## Build With GitHub Actions
@@ -65,7 +65,7 @@ app, and uploads an artifact named `Shipping-PDF-Splitter-Windows`.
 Download that artifact and run:
 
 ```text
-Shipping PDF Splitter/Shipping PDF Splitter.exe
+Shipping PDF Splitter.exe
 ```
 
 ## Build A macOS App

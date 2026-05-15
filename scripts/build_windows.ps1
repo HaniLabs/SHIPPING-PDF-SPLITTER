@@ -10,10 +10,11 @@ python -m pip install -e ".[dev]"
 pyinstaller `
     --noconfirm `
     --windowed `
+    --onefile `
     --name "Shipping PDF Splitter" `
     --collect-all fitz `
     --collect-all pytesseract `
     --collect-all PIL `
     src/shipping_pdf_splitter/__main__.py
 
-Write-Host "Build complete: dist/Shipping PDF Splitter/Shipping PDF Splitter.exe"
+Write-Host "Build complete: dist/Shipping PDF Splitter.exe"
