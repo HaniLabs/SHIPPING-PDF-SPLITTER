@@ -15,6 +15,10 @@ pyinstaller `
     --collect-all fitz `
     --collect-all pytesseract `
     --collect-all PIL `
-    src/shipping_pdf_splitter/__main__.py
+    --hidden-import shipping_pdf_splitter.gui `
+    --hidden-import shipping_pdf_splitter.pdf_splitter `
+    --hidden-import shipping_pdf_splitter.ocr `
+    --hidden-import shipping_pdf_splitter.models `
+    src/shipping_pdf_splitter_launcher.py
 
 Write-Host "Build complete: dist/Shipping PDF Splitter.exe"
