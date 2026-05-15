@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import io
+import os
 import re
+import sys
 from pathlib import Path
 
-import fitz
-import pytesseract
+import fitz  # type: ignore[import-not-found]
+import pytesseract  # type: ignore[import-not-found]
 from PIL import Image
 
 from .models import PageMatch
@@ -27,6 +29,7 @@ REFERENCE_BLOCK_RE = re.compile(
     re.IGNORECASE,
 )
 SIX_DIGIT_RE = re.compile(r"\b\d{6}\b")
+_TESSERACT_CONFIGURED = False
 
 
 def normalize_ocr_text(text: str) -> str:
@@ -117,6 +120,7 @@ def _looks_like_shipping_list(value: str) -> bool:
 
 
 def ocr_pdf_pages(pdf_path: Path, progress=None) -> list[PageMatch]:
+    configure_tesseract()
     matches: list[PageMatch] = []
     with fitz.open(pdf_path) as document:
         total_pages = len(document)
@@ -134,6 +138,31 @@ def ocr_pdf_pages(pdf_path: Path, progress=None) -> list[PageMatch]:
                 )
             )
     return matches
+
+
+def configure_tesseract() -> None:
+    global _TESSERACT_CONFIGURED
+    if _TESSERACT_CONFIGURED:
+        return
+
+    bundled_dir = bundled_tesseract_dir()
+    if bundled_dir:
+        pytesseract.pytesseract.tesseract_cmd = str(bundled_dir / "tesseract.exe")
+        tessdata_dir = bundled_dir / "tessdata"
+        if tessdata_dir.is_dir():
+            os.environ["TESSDATA_PREFIX"] = str(tessdata_dir)
+        os.environ["PATH"] = f"{bundled_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+
+    _TESSERACT_CONFIGURED = True
+
+
+def bundled_tesseract_dir(base_dir: Path | None = None) -> Path | None:
+    bundle_root = base_dir or Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    tesseract_dir = bundle_root / "tesseract"
+    tesseract_exe = tesseract_dir / "tesseract.exe"
+    if tesseract_exe.exists():
+        return tesseract_dir
+    return None
 
 
 def ocr_page(page: fitz.Page) -> str:

@@ -1,4 +1,8 @@
-from shipping_pdf_splitter.ocr import extract_page_match, extract_shipping_list_references
+from shipping_pdf_splitter.ocr import (
+    bundled_tesseract_dir,
+    extract_page_match,
+    extract_shipping_list_references,
+)
 
 
 def test_extracts_front_page_fields_from_shipping_list_header():
@@ -95,3 +99,12 @@ def test_extracts_slash_delimited_references_from_bill_of_lading_text():
     text = "REFERENCE NUMBERS: 451381 / 151348 //151349 CONSIGNEE ABB INC"
 
     assert extract_shipping_list_references(text) == ["151348", "151349"]
+
+
+def test_detects_bundled_tesseract_directory(tmp_path):
+    tesseract_dir = tmp_path / "tesseract"
+    tesseract_dir.mkdir()
+    (tesseract_dir / "tesseract.exe").write_bytes(b"fake exe")
+    (tesseract_dir / "tessdata").mkdir()
+
+    assert bundled_tesseract_dir(tmp_path) == tesseract_dir
