@@ -4,6 +4,7 @@ import io
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import fitz  # type: ignore[import-not-found]
@@ -29,6 +30,35 @@ REFERENCE_BLOCK_RE = re.compile(
     re.IGNORECASE,
 )
 SIX_DIGIT_RE = re.compile(r"\b\d{6}\b")
+DATE_LABEL_RE = re.compile(r"\b(?:SHIP\s*DATE|DATE\s+SHIPPED)\b", re.IGNORECASE)
+DATE_VALUE_RE = re.compile(r"\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b")
+SHIP_TO_BLOCK_RE = re.compile(
+    r"\bSHIP\s+TO\s*[:;]?\s*(?P<address>.*?)(?:\bSHIP\s*DATE\b|\bCUSTOMER\s+PO\b|$)",
+    re.IGNORECASE,
+)
+MARKED_DESTINATION_RE = re.compile(
+    r"OCR\s+DESTINATION\s+START(?P<address>.*?)OCR\s+DESTINATION\s+END",
+    re.IGNORECASE,
+)
+POSTAL_CODE_RE = re.compile(r"\b\d{5}(?:-\d{4})?\b")
+STATE_CODES = (
+    "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|"
+    "MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|"
+    "UT|VT|VA|WA|WV|WI|WY|DC"
+)
+HIGHWAY_ADDRESS_RE = re.compile(
+    r"\b\d{1,6}\s+(?:(?:US|STATE|COUNTY)\s+)?"
+    r"(?:HIGHWAY|HWY|ROUTE|RT)\s+[A-Z0-9-]+"
+    r"(?:\s+(?:NORTH|SOUTH|EAST|WEST|N|S|E|W))?\b",
+    re.IGNORECASE,
+)
+STREET_ADDRESS_RE = re.compile(
+    r"\b\d{1,6}\s+(?:(?:NORTH|SOUTH|EAST|WEST|N|S|E|W)\s+)?"
+    r"(?:[A-Z0-9-]+\s+){1,5}"
+    r"(?:STREET|ST|ROAD|RD|DRIVE|DR|AVENUE|AVE|BOULEVARD|BLVD|LANE|LN|"
+    r"COURT|CT|CIRCLE|CIR|PARKWAY|PKWY|PLACE|PL|TERRACE|TER)\b",
+    re.IGNORECASE,
+)
 _TESSERACT_CONFIGURED = False
 
 
@@ -43,6 +73,18 @@ def extract_page_match(
     page_index: int | None = None,
 ) -> PageMatch:
     normalized = normalize_ocr_text(text)
+    ship_date = extract_ship_date(normalized)
+    ship_to_address = extract_ship_to_address(normalized)
+    has_bol_title = bool(
+        re.search(r"\bBILL\s+OF\s+LADING\b", normalized, re.IGNORECASE)
+    )
+    is_bill_of_lading = has_bol_title and bool(
+        re.search(
+            r"\b(?:DATE\s+SHIPPED|STRAIGHT\s+BILL\s+OF\s+LADING|CONSIGNEE\s*\(?\s*TO)\b",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
     front = FRONT_PAGE_RE.search(normalized)
     if front:
         shipping_list = front.group("shipping_list")
@@ -54,8 +96,11 @@ def extract_page_match(
             shipping_list=shipping_list,
             customer_no=front.group("customer_no"),
             sales_order=front.group("sales_order"),
+            ship_date=ship_date,
+            ship_to_address=ship_to_address,
             references=[shipping_list],
             is_front_page=True,
+            is_bill_of_lading=is_bill_of_lading,
         )
 
     shipper = SHIPPING_LIST_RE.search(normalized)
@@ -69,8 +114,11 @@ def extract_page_match(
             text=normalized,
             shipping_list=shipping_list,
             sales_order=sales_order.group("sales_order") if sales_order else None,
+            ship_date=ship_date,
+            ship_to_address=ship_to_address,
             references=[shipping_list],
             is_front_page=True,
+            is_bill_of_lading=is_bill_of_lading,
         )
 
     return PageMatch(
@@ -78,9 +126,88 @@ def extract_page_match(
         page_index=page_number - 1 if page_index is None else page_index,
         page_number=page_number,
         text=normalized,
+        ship_date=ship_date,
+        ship_to_address=ship_to_address,
         references=extract_shipping_list_references(normalized),
         is_front_page=False,
+        is_bill_of_lading=is_bill_of_lading,
     )
+
+
+def extract_ship_date(text: str) -> str | None:
+    normalized = normalize_ocr_text(text)
+    for label in DATE_LABEL_RE.finditer(normalized):
+        value = DATE_VALUE_RE.search(normalized, label.end(), label.end() + 220)
+        if value:
+            return _normalize_date(value.group())
+    return None
+
+
+def extract_ship_to_address(text: str) -> str | None:
+    normalized = normalize_ocr_text(text)
+    blocks = [match.group("address") for match in MARKED_DESTINATION_RE.finditer(normalized)]
+    blocks.extend(match.group("address") for match in SHIP_TO_BLOCK_RE.finditer(normalized))
+    for block in blocks:
+        address = _address_key(block)
+        if address:
+            return address
+    return None
+
+
+def _normalize_date(value: str) -> str | None:
+    cleaned = value.replace(".", "/").replace("-", "/")
+    for pattern in ("%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return datetime.strptime(cleaned, pattern).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _address_key(block: str) -> str | None:
+    cleaned = re.sub(r"[^A-Za-z0-9-]+", " ", block).upper().strip()
+    postal_codes = POSTAL_CODE_RE.findall(cleaned)
+    if not postal_codes:
+        return None
+    postal_code = postal_codes[-1]
+
+    state_matches = list(
+        re.finditer(rf"\b(?P<state>{STATE_CODES})\b\s+{re.escape(postal_code)}\b", cleaned)
+    )
+    if not state_matches:
+        return None
+    state = state_matches[-1].group("state")
+
+    street_matches = list(HIGHWAY_ADDRESS_RE.finditer(cleaned))
+    street_matches.extend(STREET_ADDRESS_RE.finditer(cleaned))
+    if not street_matches:
+        return None
+    street = max(street_matches, key=lambda match: match.start()).group()
+    street = _normalize_street(street)
+    return f"{street}|{state}|{postal_code}"
+
+
+def _normalize_street(street: str) -> str:
+    aliases = {
+        "HIGHWAY": "HWY",
+        "ROUTE": "RT",
+        "STREET": "ST",
+        "ROAD": "RD",
+        "DRIVE": "DR",
+        "AVENUE": "AVE",
+        "BOULEVARD": "BLVD",
+        "LANE": "LN",
+        "COURT": "CT",
+        "CIRCLE": "CIR",
+        "PARKWAY": "PKWY",
+        "PLACE": "PL",
+        "TERRACE": "TER",
+        "NORTH": "N",
+        "SOUTH": "S",
+        "EAST": "E",
+        "WEST": "W",
+    }
+    return " ".join(aliases.get(token, token) for token in street.upper().split())
 
 
 def extract_shipping_list_references(text: str) -> list[str]:
@@ -170,10 +297,23 @@ def ocr_page(page: fitz.Page) -> str:
     image = Image.open(io.BytesIO(pix.tobytes("png")))
     width, height = image.size
     top_right = image.crop((int(width * 0.45), 0, width, int(height * 0.32)))
+    top_half = image.crop((0, 0, width, int(height * 0.48)))
 
     top_text = pytesseract.image_to_string(top_right, config="--psm 6")
-    if FRONT_PAGE_RE.search(normalize_ocr_text(top_text)):
-        return top_text
+    top_half_text = pytesseract.image_to_string(top_half, config="--psm 6")
+    header_text = f"{top_half_text}\n{top_text}"
+    normalized_header = normalize_ocr_text(header_text)
+    if FRONT_PAGE_RE.search(normalized_header):
+        return header_text
 
     full_text = pytesseract.image_to_string(image, config="--psm 6")
-    return f"{top_text}\n{full_text}"
+    destination_text = ""
+    if re.search(r"\bBILL\s+OF\s+LADING\b", normalized_header, re.IGNORECASE):
+        destination = image.crop(
+            (int(width * 0.45), int(height * 0.15), width, int(height * 0.42))
+        )
+        destination_ocr = pytesseract.image_to_string(destination, config="--psm 6")
+        destination_text = (
+            f"\nOCR DESTINATION START\n{destination_ocr}\nOCR DESTINATION END"
+        )
+    return f"{header_text}{destination_text}\n{full_text}"

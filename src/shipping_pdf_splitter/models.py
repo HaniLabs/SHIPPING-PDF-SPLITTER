@@ -11,8 +11,11 @@ class PageMatch:
     shipping_list: str | None = None
     customer_no: str | None = None
     sales_order: str | None = None
+    ship_date: str | None = None
+    ship_to_address: str | None = None
     references: list[str] = field(default_factory=list)
     is_front_page: bool = False
+    is_bill_of_lading: bool = False
 
 
 @dataclass
@@ -20,6 +23,8 @@ class PageGroup:
     shipping_list: str
     customer_no: str | None = None
     sales_order: str | None = None
+    ship_date: str | None = None
+    ship_to_address: str | None = None
     pages: list[PageMatch] = field(default_factory=list)
 
 

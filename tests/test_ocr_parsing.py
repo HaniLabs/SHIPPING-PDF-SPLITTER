@@ -1,6 +1,8 @@
 from shipping_pdf_splitter.ocr import (
     bundled_tesseract_dir,
     extract_page_match,
+    extract_ship_date,
+    extract_ship_to_address,
     extract_shipping_list_references,
 )
 
@@ -99,6 +101,41 @@ def test_extracts_slash_delimited_references_from_bill_of_lading_text():
     text = "REFERENCE NUMBERS: 451381 / 151348 //151349 CONSIGNEE ABB INC"
 
     assert extract_shipping_list_references(text) == ["151348", "151349"]
+
+
+def test_normalizes_shipper_date_and_ship_to_address():
+    text = (
+        "Shipping List 151179 Customer No 001656 Sales Order 089646-00 "
+        "Sales Order Shipper Ship to: ABB INC PINETOPS MV PRODUCTS "
+        "996 HWY 111 SOUTH PINETOPS NC 27864 United States "
+        "Ship Date Customer PO 04-20-2026 4503930603"
+    )
+
+    match = extract_page_match(page_number=2, text=text)
+
+    assert match.ship_date == "2026-04-20"
+    assert match.ship_to_address == "996 HWY 111 S|NC|27864"
+
+
+def test_normalizes_bol_date_and_marked_consignee_address():
+    text = (
+        "STRAIGHT BILL OF LADING DATE SHIPPED BILL OF LADING NUMBER "
+        "4/20/26 REFERENCE NUMBERS 151179-151184 "
+        "OCR DESTINATION START CONSIGNEE TO NAME ABB INC PINETOPS MV PRODUCTS "
+        "STREET 996 HIGHWAY 111 SOUTH CITY PINETOPS NC 27864 "
+        "OCR DESTINATION END"
+    )
+
+    match = extract_page_match(page_number=1, text=text)
+
+    assert match.is_bill_of_lading is True
+    assert match.ship_date == "2026-04-20"
+    assert match.ship_to_address == "996 HWY 111 S|NC|27864"
+
+
+def test_ship_fields_require_labeled_date_and_complete_address():
+    assert extract_ship_date("Printed 04-20-2026") is None
+    assert extract_ship_to_address("Ship to: ABB INC PINETOPS NC 27864") is None
 
 
 def test_detects_bundled_tesseract_directory(tmp_path):

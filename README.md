@@ -9,6 +9,7 @@ A small desktop app for splitting scanned shipping PDFs by shipping list number.
 - OCRs each page to find `Shipping List`, `Customer No`, and `Sales Order`.
 - Creates one split PDF per shipping list number.
 - Copies bill-of-lading/reference pages into every matching shipping-list output when those pages contain multiple shipping list numbers.
+- For Decimal shipper pages, also copies a bill of lading to every shipper whose normalized `Ship Date` and `Ship to` street/state/ZIP both match the BOL, even when the BOL omits that shipper number.
 - Writes pages that cannot be matched to a review PDF.
 
 When you choose a folder, the app creates these folders inside it:

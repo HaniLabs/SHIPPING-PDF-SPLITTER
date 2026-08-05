@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 from collections import OrderedDict
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import fitz  # type: ignore[import-not-found]
@@ -101,21 +102,64 @@ def _fill_group_metadata(group: PageGroup, match: PageMatch) -> None:
         group.customer_no = match.customer_no
     if group.sales_order is None:
         group.sales_order = match.sales_order
+    if group.ship_date is None:
+        group.ship_date = match.ship_date
+    if group.ship_to_address is None:
+        group.ship_to_address = match.ship_to_address
 
 
 def _resolve_reference_targets(
     match: PageMatch, groups: OrderedDict[str, PageGroup]
 ) -> list[str]:
     exact_targets = [reference for reference in match.references if reference in groups]
-    if exact_targets:
-        return exact_targets
-
     fuzzy_targets: list[str] = []
-    for reference in match.references:
-        fuzzy_target = _nearest_one_digit_match(reference, match.page_number, groups)
-        if fuzzy_target:
-            fuzzy_targets.append(fuzzy_target)
-    return _dedupe(fuzzy_targets)
+    if not exact_targets:
+        for reference in match.references:
+            fuzzy_target = _nearest_one_digit_match(reference, match.page_number, groups)
+            if fuzzy_target:
+                fuzzy_targets.append(fuzzy_target)
+
+    date_address_targets = _matching_date_address_targets(match, groups)
+    return _dedupe(exact_targets + fuzzy_targets + date_address_targets)
+
+
+def _matching_date_address_targets(
+    match: PageMatch, groups: OrderedDict[str, PageGroup]
+) -> list[str]:
+    if not (
+        match.is_bill_of_lading
+        and match.ship_date
+        and match.ship_to_address
+    ):
+        return []
+
+    return [
+        reference
+        for reference, group in groups.items()
+        if group.ship_date == match.ship_date
+        and _addresses_match(group.ship_to_address, match.ship_to_address)
+    ]
+
+
+def _addresses_match(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+
+    left_parts = left.split("|")
+    right_parts = right.split("|")
+    if len(left_parts) != 3 or len(right_parts) != 3:
+        return False
+    left_street, left_state, left_postal = left_parts
+    right_street, right_state, right_postal = right_parts
+    if left_state != right_state or left_postal != right_postal:
+        return False
+    left_number, _, left_name = left_street.partition(" ")
+    right_number, _, right_name = right_street.partition(" ")
+    if left_number != right_number or not left_name or not right_name:
+        return False
+    return SequenceMatcher(None, left_name, right_name).ratio() >= 0.88
 
 
 def _nearest_one_digit_match(

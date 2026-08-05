@@ -81,6 +81,87 @@ def test_duplicates_multi_reference_pages_into_each_matching_group():
     assert [page.page_number for page in groups["150998"].pages] == [2, 3]
 
 
+def test_bol_expands_to_all_groups_with_same_ship_date_and_address():
+    common_address = "996 HWY 111 S|NC|27864"
+    matches = [
+        PageMatch(
+            page_index=index,
+            page_number=index + 1,
+            text=f"shipper {shipping_list}",
+            shipping_list=shipping_list,
+            ship_date="2026-04-20",
+            ship_to_address=common_address,
+            references=[shipping_list],
+            is_front_page=True,
+        )
+        for index, shipping_list in enumerate(
+            ["151179", "151180", "151181", "151182", "151183", "151184"],
+            start=1,
+        )
+    ]
+    matches.insert(
+        0,
+        PageMatch(
+            page_index=0,
+            page_number=1,
+            text="bill of lading",
+            ship_date="2026-04-20",
+            ship_to_address=common_address,
+            references=["151179", "151184"],
+            is_bill_of_lading=True,
+        ),
+    )
+
+    groups, unmatched = build_page_groups(matches)
+
+    assert unmatched == []
+    for shipping_list in groups:
+        assert [page.page_number for page in groups[shipping_list].pages] == [
+            int(shipping_list) - 151177,
+            1,
+        ]
+
+
+def test_bol_date_address_match_requires_both_fields():
+    matches = [
+        PageMatch(
+            page_index=0,
+            page_number=1,
+            text="bill of lading",
+            ship_date="2026-04-20",
+            ship_to_address="996 HWY 111 S|NC|27864",
+            references=[],
+            is_bill_of_lading=True,
+        ),
+        PageMatch(
+            page_index=1,
+            page_number=2,
+            text="same date, wrong address",
+            shipping_list="151179",
+            ship_date="2026-04-20",
+            ship_to_address="997 HWY 111 S|NC|27864",
+            references=["151179"],
+            is_front_page=True,
+        ),
+        PageMatch(
+            page_index=2,
+            page_number=3,
+            text="same address, wrong date",
+            shipping_list="151180",
+            ship_date="2026-04-21",
+            ship_to_address="996 HWY 111 S|NC|27864",
+            references=["151180"],
+            is_front_page=True,
+        ),
+    ]
+
+    groups, unmatched = build_page_groups(matches)
+
+    assert [page.page_number for page in groups["151179"].pages] == [2]
+    assert [page.page_number for page in groups["151180"].pages] == [3]
+    assert [page.page_number for page in unmatched] == [1]
+
+
 def test_reference_page_can_attach_to_front_page_seen_later():
     matches = [
         PageMatch(
