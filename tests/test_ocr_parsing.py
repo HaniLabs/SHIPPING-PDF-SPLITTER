@@ -1,5 +1,6 @@
 from shipping_pdf_splitter.ocr import (
     bundled_tesseract_dir,
+    extract_bill_of_lading_date,
     extract_page_match,
     extract_ship_date,
     extract_ship_to_address,
@@ -131,6 +132,20 @@ def test_normalizes_bol_date_and_marked_consignee_address():
     assert match.is_bill_of_lading is True
     assert match.ship_date == "2026-04-20"
     assert match.ship_to_address == "996 HWY 111 S|NC|27864"
+
+
+def test_extracts_generic_date_from_bill_of_lading_header():
+    text = (
+        "UNIFORM STRAIGHT BILL OF LADING Date Purchase Order # "
+        "06/04/2026 4503954897 Shipper # 151720"
+    )
+
+    match = extract_page_match(page_number=1, text=text)
+
+    assert extract_bill_of_lading_date(text) == "2026-06-04"
+    assert match.is_bill_of_lading is True
+    assert match.ship_date == "2026-06-04"
+    assert match.references == ["151720"]
 
 
 def test_ship_fields_require_labeled_date_and_complete_address():

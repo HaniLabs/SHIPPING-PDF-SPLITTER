@@ -9,7 +9,7 @@ from pathlib import Path
 
 import fitz  # type: ignore[import-not-found]
 import pytesseract  # type: ignore[import-not-found]
-from PIL import Image
+from PIL import Image, ImageOps
 
 from .models import PageMatch
 
@@ -31,6 +31,7 @@ REFERENCE_BLOCK_RE = re.compile(
 )
 SIX_DIGIT_RE = re.compile(r"\b\d{6}\b")
 DATE_LABEL_RE = re.compile(r"\b(?:SHIP\s*DATE|DATE\s+SHIPPED)\b", re.IGNORECASE)
+GENERIC_DATE_LABEL_RE = re.compile(r"\bDATE\b", re.IGNORECASE)
 DATE_VALUE_RE = re.compile(r"\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b")
 SHIP_TO_BLOCK_RE = re.compile(
     r"\bSHIP\s+TO\s*[:;]?\s*(?P<address>.*?)(?:\bSHIP\s*DATE\b|\bCUSTOMER\s+PO\b|$)",
@@ -73,8 +74,6 @@ def extract_page_match(
     page_index: int | None = None,
 ) -> PageMatch:
     normalized = normalize_ocr_text(text)
-    ship_date = extract_ship_date(normalized)
-    ship_to_address = extract_ship_to_address(normalized)
     has_bol_title = bool(
         re.search(r"\bBILL\s+OF\s+LADING\b", normalized, re.IGNORECASE)
     )
@@ -85,6 +84,10 @@ def extract_page_match(
             re.IGNORECASE,
         )
     )
+    ship_date = extract_ship_date(normalized)
+    if ship_date is None and is_bill_of_lading:
+        ship_date = extract_bill_of_lading_date(normalized)
+    ship_to_address = extract_ship_to_address(normalized)
     front = FRONT_PAGE_RE.search(normalized)
     if front:
         shipping_list = front.group("shipping_list")
@@ -138,6 +141,16 @@ def extract_ship_date(text: str) -> str | None:
     normalized = normalize_ocr_text(text)
     for label in DATE_LABEL_RE.finditer(normalized):
         value = DATE_VALUE_RE.search(normalized, label.end(), label.end() + 220)
+        if value:
+            return _normalize_date(value.group())
+    return None
+
+
+def extract_bill_of_lading_date(text: str) -> str | None:
+    """Extract the generic header Date used by some carrier BOL forms."""
+    normalized = normalize_ocr_text(text)
+    for label in GENERIC_DATE_LABEL_RE.finditer(normalized):
+        value = DATE_VALUE_RE.search(normalized, label.end(), label.end() + 120)
         if value:
             return _normalize_date(value.group())
     return None
@@ -308,7 +321,9 @@ def ocr_page(page: fitz.Page) -> str:
 
     full_text = pytesseract.image_to_string(image, config="--psm 6")
     destination_text = ""
+    bol_header_text = ""
     if re.search(r"\bBILL\s+OF\s+LADING\b", normalized_header, re.IGNORECASE):
+        bol_header_text = _ocr_bill_of_lading_header(image)
         destination = image.crop(
             (int(width * 0.45), int(height * 0.15), width, int(height * 0.42))
         )
@@ -316,4 +331,31 @@ def ocr_page(page: fitz.Page) -> str:
         destination_text = (
             f"\nOCR DESTINATION START\n{destination_ocr}\nOCR DESTINATION END"
         )
-    return f"{header_text}{destination_text}\n{full_text}"
+    return f"{header_text}{bol_header_text}{destination_text}\n{full_text}"
+
+
+def _ocr_bill_of_lading_header(image: Image.Image) -> str:
+    """Re-read the carrier header with thresholding to recover faint references."""
+    width, height = image.size
+    header = image.crop(
+        (
+            int(width * 0.32),
+            int(height * 0.055),
+            int(width * 0.96),
+            int(height * 0.125),
+        )
+    )
+    grayscale = ImageOps.grayscale(header)
+    variants = [
+        grayscale.point(lambda value: 0 if value < threshold else 255)
+        for threshold in (130, 190)
+    ]
+    texts = [
+        pytesseract.image_to_string(variant, config="--psm 6")
+        for variant in variants
+    ]
+    return (
+        "\nOCR BOL HEADER START\n"
+        + "\n".join(texts)
+        + "\nOCR BOL HEADER END"
+    )

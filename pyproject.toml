@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shipping-pdf-splitter"
-version = "0.1.0"
+version = "0.1.1"
 description = "Desktop app for splitting scanned shipping PDFs by shipping list number."
 readme = "README.md"
 requires-python = ">=3.10"
