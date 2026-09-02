@@ -7,6 +7,8 @@ A small desktop app for splitting scanned shipping PDFs by shipping list number.
 - Lets you choose a folder containing PDF files.
 - Moves each input PDF into an `old` folder so the selected folder is clean for the next run.
 - OCRs each page to find `Shipping List`, `Customer No`, and `Sales Order`.
+- Re-checks bill-of-lading headers with a bundled CPU-only neural OCR model to
+  recover faint or easily confused shipper numbers.
 - Creates one split PDF per shipping list number.
 - Copies bill-of-lading/reference pages into every matching shipping-list output when those pages contain multiple shipping list numbers.
 - For Decimal shipper pages, also copies a bill of lading to every shipper whose normalized `Ship Date` and `Ship to` street/state/ZIP both match the BOL, even when the BOL omits that shipper number.
@@ -21,6 +23,10 @@ When you choose a folder, the app creates these folders inside it:
 
 - Python 3.10 or newer.
 - Tesseract OCR installed and available on `PATH`.
+
+The downloadable Windows executable includes both Tesseract and the neural OCR
+model. It works offline on other Windows PCs and does not require Python, a GPU,
+or a separate OCR installation.
 
 Windows Tesseract install options:
 
@@ -88,4 +94,5 @@ dist/Shipping PDF Splitter.app
 
 Build the final Windows executable on Windows and the final macOS app on macOS. Cross-compiling these desktop bundles from Linux is not reliable.
 
-The app depends on Tesseract OCR at runtime. Keep Tesseract installed on the computer where you run the app.
+Source installs depend on Tesseract at runtime. The released Windows executable
+bundles Tesseract and all OCR models.

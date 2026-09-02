@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import importlib
 import os
 import re
 import sys
@@ -61,6 +62,8 @@ STREET_ADDRESS_RE = re.compile(
     re.IGNORECASE,
 )
 _TESSERACT_CONFIGURED = False
+_NEURAL_OCR_ENGINE = None
+NEURAL_OCR_MIN_CONFIDENCE = 0.75
 
 
 def normalize_ocr_text(text: str) -> str:
@@ -322,8 +325,10 @@ def ocr_page(page: fitz.Page) -> str:
     full_text = pytesseract.image_to_string(image, config="--psm 6")
     destination_text = ""
     bol_header_text = ""
+    neural_header_text = ""
     if re.search(r"\bBILL\s+OF\s+LADING\b", normalized_header, re.IGNORECASE):
         bol_header_text = _ocr_bill_of_lading_header(image)
+        neural_header_text = _ocr_bill_of_lading_neural_header(image)
         destination = image.crop(
             (int(width * 0.45), int(height * 0.15), width, int(height * 0.42))
         )
@@ -331,7 +336,10 @@ def ocr_page(page: fitz.Page) -> str:
         destination_text = (
             f"\nOCR DESTINATION START\n{destination_ocr}\nOCR DESTINATION END"
         )
-    return f"{header_text}{bol_header_text}{destination_text}\n{full_text}"
+    return (
+        f"{header_text}{bol_header_text}{neural_header_text}"
+        f"{destination_text}\n{full_text}"
+    )
 
 
 def _ocr_bill_of_lading_header(image: Image.Image) -> str:
@@ -358,4 +366,42 @@ def _ocr_bill_of_lading_header(image: Image.Image) -> str:
         "\nOCR BOL HEADER START\n"
         + "\n".join(texts)
         + "\nOCR BOL HEADER END"
+    )
+
+
+def _get_neural_ocr_engine():
+    """Create the CPU-only OCR engine once, only when a BOL needs it."""
+    global _NEURAL_OCR_ENGINE
+    if _NEURAL_OCR_ENGINE is None:
+        rapidocr = importlib.import_module("rapidocr")
+        _NEURAL_OCR_ENGINE = rapidocr.RapidOCR()
+    return _NEURAL_OCR_ENGINE
+
+
+def _ocr_bill_of_lading_neural_header(image: Image.Image) -> str:
+    """Use neural OCR on the small BOL header where key identifiers live."""
+    width, height = image.size
+    header = image.crop((0, 0, width, int(height * 0.18)))
+
+    try:
+        result = _get_neural_ocr_engine()(header)
+    except Exception:
+        # Tesseract remains the primary engine, so an unavailable neural fallback
+        # must not prevent the rest of the shipment from being processed.
+        return ""
+
+    texts = getattr(result, "txts", None) or ()
+    scores = getattr(result, "scores", None) or ()
+    confident_text = [
+        str(text)
+        for text, score in zip(texts, scores)
+        if float(score) >= NEURAL_OCR_MIN_CONFIDENCE
+    ]
+    if not confident_text:
+        return ""
+
+    return (
+        "\nOCR NEURAL BOL HEADER START\n"
+        + "\n".join(confident_text)
+        + "\nOCR NEURAL BOL HEADER END"
     )

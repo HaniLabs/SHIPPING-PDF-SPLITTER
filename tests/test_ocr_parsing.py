@@ -1,4 +1,10 @@
+from types import SimpleNamespace
+
+from PIL import Image
+
+from shipping_pdf_splitter import ocr
 from shipping_pdf_splitter.ocr import (
+    _ocr_bill_of_lading_neural_header,
     bundled_tesseract_dir,
     extract_bill_of_lading_date,
     extract_page_match,
@@ -160,3 +166,29 @@ def test_detects_bundled_tesseract_directory(tmp_path):
     (tesseract_dir / "tessdata").mkdir()
 
     assert bundled_tesseract_dir(tmp_path) == tesseract_dir
+
+
+def test_neural_bol_header_keeps_only_confident_text(monkeypatch):
+    class FakeEngine:
+        def __call__(self, image):
+            assert image.size == (1000, 180)
+            return SimpleNamespace(
+                txts=("Shipper #", "151720", "unreliable 181720"),
+                scores=(0.99, 0.999, 0.41),
+            )
+
+    monkeypatch.setattr(ocr, "_get_neural_ocr_engine", lambda: FakeEngine())
+
+    text = _ocr_bill_of_lading_neural_header(Image.new("RGB", (1000, 1000)))
+
+    assert "Shipper #\n151720" in text
+    assert "181720" not in text
+
+
+def test_neural_bol_header_failure_does_not_stop_processing(monkeypatch):
+    def fail_to_load():
+        raise RuntimeError("model unavailable")
+
+    monkeypatch.setattr(ocr, "_get_neural_ocr_engine", fail_to_load)
+
+    assert _ocr_bill_of_lading_neural_header(Image.new("RGB", (100, 100))) == ""
